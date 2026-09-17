@@ -3,11 +3,14 @@ import random
 import os
 import math
 import pygame
-from assets import AssetManager
-from effects import ParticleSystem
 
+# Initialize sound mixer buffer BEFORE pygame.init() for PyInstaller runtime
+pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
 pygame.mixer.init()
+
+from assets import AssetManager
+from effects import ParticleSystem
 
 GAME_W, GAME_H = 500, 375
 SCALE = 2
@@ -21,8 +24,13 @@ CLOCK = pygame.time.Clock()
 assets = AssetManager()
 particles = ParticleSystem(GAME_W, GAME_H, assets.images["snowflake"])
 
+# Helper function to get correct relative asset path for PyInstaller
+def get_resource_path(*relative_path_parts):
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, *relative_path_parts)
+
 # Load Audio Files
-AUDIO_DIR = os.path.join("data", "audio")
+AUDIO_DIR = get_resource_path("data", "audio")
 
 # 1. Background Music
 bgm_path = os.path.join(AUDIO_DIR, "bgm.mp3")
