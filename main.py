@@ -21,7 +21,7 @@ particles = ParticleSystem(GAME_W, GAME_H, assets.images["snowflake"])
 
 DOF_TYPES = ["LEFT", "UP", "DOWN", "RIGHT"]
 current_dof_idx = 0
-dof_charges = 3
+dof_charges = 4
 last_charge_time = pygame.time.get_ticks()
 
 SCORE_FILE = "highscore.txt"
@@ -121,8 +121,7 @@ class Obstacle(pygame.sprite.Sprite):
 class Player(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
-        self.image = assets.images["robot"]
-        self.rect = self.image.get_rect(topleft=(x, y))
+        self.rect = pygame.Rect(x + 1, y, 10, 18)
         self.x = float(x)
         self.y = float(y)
         self.vel_y = 0.0
@@ -130,21 +129,46 @@ class Player(pygame.sprite.Sprite):
         self.slow_timer = 0.0
         self.slide_vel = 0.0
         self.is_grounded = False
-        self.facing = 1
+        self.current_platform = None
+        self.facing = 1  # 1 = Right, -1 = Left
+        
+        # Animation states
+        self.anim_timer = 0.0
+        self.anim_frame = 0
+        self.image = assets.images["player_idle"]
 
-    def apply_slow(self, duration=1.5):
+    def apply_slow(self, duration):
+        """Fixes Bug #1: Applies speed reduction when hitting bushes."""
         self.slow_timer = duration
+
+    def update_animation(self, dt, input_dir):
+        # 1. Airborne state takes priority
+        if not self.is_grounded:
+            current_img = assets.images["player_jump"]
+        # 2. Running / Moving state (only run when actually moving significantly)
+        elif input_dir != 0 or abs(self.slide_vel) > 0.5:
+            self.anim_timer += dt * 8  # Animation speed
+            self.anim_frame = int(self.anim_timer) % len(assets.images["player_run"])
+            current_img = assets.images["player_run"][self.anim_frame]
+        # 3. Idle state
+        else:
+            self.anim_timer = 0
+            current_img = assets.images["player_idle"]
+
+        # Flip horizontally if facing left
+        if self.facing == -1:
+            self.image = pygame.transform.flip(current_img, True, False)
+        else:
+            self.image = current_img
 
     def update(self, platforms, dt):
         keys = pygame.key.get_pressed()
         
-        # Determine base movement speed
         current_speed = self.base_speed
         if self.slow_timer > 0:
             self.slow_timer -= dt
             current_speed = 0.8
             
-        # Horizontal Input Handling
         input_dir = 0
         if keys[pygame.K_a]:
             input_dir -= 1
@@ -153,55 +177,79 @@ class Player(pygame.sprite.Sprite):
             input_dir += 1
             self.facing = 1
 
-        self.x += input_dir * current_speed
-
-        # Jump handling (carries slide momentum)
         if keys[pygame.K_SPACE] and self.is_grounded:
             self.vel_y = -5.5
             self.is_grounded = False
 
         self.vel_y += 0.3
-        
-        # Vertical movement and collision
-        old_bottom = self.rect.bottom
-        self.y += self.vel_y
-        self.rect.y = int(self.y)
 
-        self.is_grounded = False
-        current_platform = None
-
-        if self.vel_y >= 0:
-            # Requires horizontal overlap of at least 2 pixels to prevent edge-phasing
-            for platform in platforms:
-                if (old_bottom <= platform.rect.top + 4 and 
-                    self.rect.bottom >= platform.rect.top and 
-                    self.rect.right > platform.rect.left + 2 and 
-                    self.rect.left < platform.rect.right - 2):
-                    
-                    self.rect.bottom = platform.rect.top
-                    self.y = float(self.rect.y)
-                    self.vel_y = 0.0
-                    self.is_grounded = True
-                    current_platform = platform
-                    platform.step_on()
-                    break
-
-        # Ice slide momentum physics
-        if self.is_grounded and current_platform and current_platform.p_type == "ice":
+        if self.is_grounded and self.current_platform and self.current_platform.p_type == "ice":
             if input_dir != 0:
                 self.slide_vel += input_dir * 0.15
             else:
-                self.slide_vel *= 0.92  # Smooth glide friction when no key pressed
+                self.slide_vel *= 0.92
             self.slide_vel = max(-1.8, min(1.8, self.slide_vel))
         else:
-            # Preserve momentum during airborne jumps, gently fade out over time
             air_drag = 0.98 if not self.is_grounded else 0.60
             self.slide_vel *= air_drag
             if abs(self.slide_vel) < 0.02:
                 self.slide_vel = 0.0
 
-        self.x += self.slide_vel
+        # Step 1: Horizontal Movement
+        total_dx = (input_dir * current_speed) + self.slide_vel
+        self.x += total_dx
         self.rect.x = int(self.x)
+
+        for platform in platforms:
+            if self.rect.colliderect(platform.rect):
+                if total_dx > 0:
+                    self.rect.right = platform.rect.left
+                    self.x = float(self.rect.x)
+                elif total_dx < 0:
+                    self.rect.left = platform.rect.right
+                    self.x = float(self.rect.x)
+
+        # Step 2: Vertical Movement & Ground Check
+        was_grounded = self.is_grounded
+        self.is_grounded = False
+        
+        # Test 1 pixel down to maintain steady grounded state without jitter
+        self.rect.y += 1
+        for platform in platforms:
+            if self.rect.colliderect(platform.rect):
+                if self.vel_y >= 0:
+                    self.is_grounded = True
+                    self.current_platform = platform
+                    break
+        self.rect.y -= 1
+
+        steps = int(abs(self.vel_y)) + 1
+        dy_per_step = self.vel_y / steps
+
+        for _ in range(steps):
+            self.y += dy_per_step
+            self.rect.y = int(self.y)
+
+            for platform in platforms:
+                if self.rect.colliderect(platform.rect):
+                    if self.vel_y > 0:
+                        self.rect.bottom = platform.rect.top
+                        self.y = float(self.rect.y)
+                        self.vel_y = 0.0
+                        self.is_grounded = True
+                        self.current_platform = platform
+                        platform.step_on()
+                        break
+                    elif self.vel_y < 0:
+                        self.rect.top = platform.rect.bottom
+                        self.y = float(self.rect.y)
+                        self.vel_y = 0.0
+                        break
+            if self.is_grounded:
+                break
+
+        # Update frame rendering
+        self.update_animation(dt, input_dir)
 
 
 # Separate Groups for logic handling

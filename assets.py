@@ -55,3 +55,10 @@ class AssetManager:
         pygame.draw.rect(robot_surf, (20, 30, 50), (1, 2, 6, 4))
         pygame.draw.rect(robot_surf, (255, 50, 50), (3, 3, 2, 2))
         self.images["robot"] = robot_surf
+
+        self.images["player_idle"] = self.load_image("player/Stand.png", (200, 60, 180), (16, 20))
+        self.images["player_jump"] = self.load_image("player/Jump.png", (200, 60, 180), (16, 20))
+        self.images["player_run"] = [
+            self.load_image("player/Fwd1.png", (200, 60, 180), (16, 20)),
+            self.load_image("player/Fwd2.png", (200, 60, 180), (16, 20))
+        ]
