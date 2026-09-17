@@ -1,10 +1,19 @@
 import os
+import sys
 import pygame
+
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 class AssetManager:
     def __init__(self, base_path=None):
         if base_path is None:
-            self.base_path = os.path.join("data", "images")
+            self.base_path = get_resource_path(os.path.join("data", "images"))
         else:
             self.base_path = base_path
         self.images = {}

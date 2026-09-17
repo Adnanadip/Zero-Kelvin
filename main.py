@@ -6,6 +6,14 @@ import pygame
 from assets import AssetManager
 from effects import ParticleSystem
 
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 pygame.init()
 pygame.mixer.init()
 
@@ -21,8 +29,8 @@ CLOCK = pygame.time.Clock()
 assets = AssetManager()
 particles = ParticleSystem(GAME_W, GAME_H, assets.images["snowflake"])
 
-# Load Audio Files
-AUDIO_DIR = os.path.join("data", "audio")
+# Load Audio Files using absolute paths
+AUDIO_DIR = get_resource_path(os.path.join("data", "audio"))
 
 # 1. Background Music
 bgm_path = os.path.join(AUDIO_DIR, "bgm.mp3")
@@ -565,6 +573,6 @@ while True:
             screen_shake -= 1
 
         scaled_surface = pygame.transform.scale(CANVAS, (WINDOW_W, WINDOW_H))
-        SCREEN.blit(scaled_surface, (shake_x, shake_y))
+        SCREEN.blit(scaled_surface, (0, 0))
 
         pygame.display.flip()
