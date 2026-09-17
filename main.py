@@ -21,7 +21,7 @@ particles = ParticleSystem(GAME_W, GAME_H, assets.images["snowflake"])
 
 DOF_TYPES = ["LEFT", "UP", "DOWN", "RIGHT"]
 current_dof_idx = 0
-dof_charges = 4
+dof_charges = 3
 last_charge_time = pygame.time.get_ticks()
 
 SCORE_FILE = "highscore.txt"
@@ -344,7 +344,7 @@ while running:
     max_gap = min(80, 45 + (game_time * 0.4))
 
     now = pygame.time.get_ticks()
-    if dof_charges < 3 and now - last_charge_time > 30000:
+    if dof_charges < 3 and now - last_charge_time > 10000:
         dof_charges += 1
         last_charge_time = now
 
