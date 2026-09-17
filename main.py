@@ -341,74 +341,56 @@ def reset_game_state():
 def spawn_world_chunk():
     global last_spawn_x, last_spawn_y
     
-    while last_spawn_x < player.rect.x + GAME_W + 200:
-        dist = player.rect.x // 10
+    while last_spawn_x < player.rect.x + GAME_W + 150:
+        # Choose a platform challenge type randomly
+        scenario = random.choice(["IMPOSSIBLE_GAP", "WALL_BLOCK", "HIGH_PEAK", "STANDARD"])
         
-        # Difficulty weighting
-        if dist < 30:
-            scenarios = ["STANDARD", "STANDARD", "HIGH_WALL"]
-        elif dist < 100:
-            scenarios = ["STANDARD", "GAP_IMPOSSIBLE", "HIGH_WALL", "FLOATING_STAIRS"]
-        else:
-            scenarios = ["GAP_IMPOSSIBLE", "HIGH_WALL", "FLOATING_STAIRS", "ISLAND_DROP"]
-
-        choice = random.choice(scenarios)
-
-        if choice == "GAP_IMPOSSIBLE":
-            # Uncrossable gap: requires DOF LEFT
-            gap = random.randint(110, 145)
-            tile_count = random.randint(2, 4)
+        if scenario == "IMPOSSIBLE_GAP":
+            gap = random.randint(90, 130)  
+            spawn_y = last_spawn_y + random.choice([-10, 0, 10])
+            tile_count = random.randint(3, 5)
             spawn_x = last_spawn_x + gap
-            spawn_y = max(80, min(GAME_H - 60, last_spawn_y + random.choice([-15, 0, 15])))
             
             plat = Platform(spawn_x, spawn_y, tile_count, "normal")
             platforms.add(plat)
             
-            if random.random() < 0.8:
-                tokens.add(Token(spawn_x + 8, spawn_y - 12, plat))
+            if random.random() < 0.6:
+                tokens.add(Token(spawn_x + 16, spawn_y - 12, plat))
 
-        elif choice == "HIGH_WALL":
-            # Platform blocking path: requires DOF DOWN or RIGHT
+        elif scenario == "WALL_BLOCK":
             gap = random.randint(30, 45)
             spawn_x = last_spawn_x + gap
-            spawn_y = max(60, last_spawn_y - 55)
-            tile_count = random.randint(3, 5)
+            spawn_y = max(90, last_spawn_y - 35)
+            tile_count = random.randint(3, 5)  # Defined tile_count here to fix the error
             
             plat = Platform(spawn_x, spawn_y, tile_count, "ice")
             platforms.add(plat)
             
-            # Wall extension downwards
-            wall_block = Platform(spawn_x, spawn_y + 16, tile_count, "normal")
-            platforms.add(wall_block)
+            # Blocking upper platform hanging overhead
+            blocker = Platform(spawn_x - 10, spawn_y - 32, 3, "normal")
+            platforms.add(blocker)
 
-        elif choice == "FLOATING_STAIRS":
-            # Spawns far above unreachable by jumping: requires DOF DOWN
-            gap = random.randint(50, 70)
+        elif scenario == "HIGH_PEAK":
+            gap = random.randint(40, 60)
             spawn_x = last_spawn_x + gap
-            spawn_y = max(50, last_spawn_y - 75)
-            tile_count = random.randint(2, 3)
+            spawn_y = max(60, last_spawn_y - 65)
+            tile_count = random.randint(3, 4)
             
             plat = Platform(spawn_x, spawn_y, tile_count, "crack0")
             platforms.add(plat)
 
-        else: # STANDARD
+        else:  # STANDARD
             gap = random.randint(35, 55)
+            spawn_y = max(80, min(GAME_H - 50, last_spawn_y + random.choice([-20, 0, 20])))
             spawn_x = last_spawn_x + gap
-            spawn_y = max(80, min(GAME_H - 50, last_spawn_y + random.choice([-25, 0, 25])))
-            tile_count = random.randint(3, 5)
+            tile_count = random.randint(4, 6)
             
             plat = Platform(spawn_x, spawn_y, tile_count, random.choice(["normal", "ice"]))
             platforms.add(plat)
             
-            if random.random() < 0.4:
-                obs = random.choice(["spike", "rock0", "bush"])
-                obs_offset = random.randint(0, tile_count - 1) * 16
-                if obs == "spike":
-                    spikes.add(Obstacle(spawn_x + obs_offset, spawn_y, "spike", plat))
-                elif obs == "rock0":
-                    rocks.add(Obstacle(spawn_x + obs_offset, spawn_y, "rock0", plat))
-                elif obs == "bush":
-                    bushes.add(Obstacle(spawn_x + obs_offset, spawn_y, "bush", plat))
+            if random.random() < 0.35:
+                obs_offset = random.randint(1, tile_count - 1) * 16
+                spikes.add(Obstacle(spawn_x + obs_offset, spawn_y, "spike", plat))
 
         last_spawn_x = spawn_x + (tile_count * 16)
         last_spawn_y = spawn_y
