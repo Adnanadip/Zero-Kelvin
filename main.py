@@ -33,7 +33,7 @@ if os.path.exists(bgm_path):
 
 # 2. Jump SFX
 jump_sound = None
-jump_path = os.path.join(AUDIO_DIR, "jump.mp3s")
+jump_path = os.path.join(AUDIO_DIR, "jump.mp3")
 if os.path.exists(jump_path):
     jump_sound = pygame.mixer.Sound(jump_path)
     jump_sound.set_volume(0.6)
