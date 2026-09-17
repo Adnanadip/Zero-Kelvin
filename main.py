@@ -1,13 +1,13 @@
 import sys
 import random
+import os
 import pygame
 from assets import AssetManager
 from effects import ParticleSystem
 
 pygame.init()
 
-# Game Canvas (320x240) and Window Scale
-GAME_W, GAME_H = 320, 240
+GAME_W, GAME_H = 500, 400
 SCALE = 3
 WINDOW_W, WINDOW_H = GAME_W * SCALE, GAME_H * SCALE
 
@@ -24,77 +24,181 @@ current_dof_idx = 0
 dof_charges = 3
 last_charge_time = pygame.time.get_ticks()
 
+SCORE_FILE = "highscore.txt"
+
+def load_high_score():
+    if os.path.exists(SCORE_FILE):
+        with open(SCORE_FILE, "r") as f:
+            try:
+                return int(f.read())
+            except ValueError:
+                return 0
+    return 0
+
+def save_high_score(score):
+    with open(SCORE_FILE, "w") as f:
+        f.write(str(score))
+
+best_distance = load_high_score()
+
 class Platform(pygame.sprite.Sprite):
     def __init__(self, x, y, width_in_tiles=4, p_type="normal"):
         super().__init__()
         self.p_type = p_type
         self.width_in_tiles = width_in_tiles
-        self.tile_img = assets.images.get(f"tile_{p_type}", assets.images["tile_normal"])
+        self.crack_frame = 0 if p_type.startswith("crack") else None
+        self.decay_start_time = None
+        self.attached_entities = []
         
-        # Render dynamic wide platform surface
-        self.image = pygame.Surface((16 * width_in_tiles, 16), pygame.SRCALPHA)
-        for i in range(width_in_tiles):
-            self.image.blit(self.tile_img, (i * 16, 0))
-            
+        self.update_appearance()
         self.rect = self.image.get_rect(topleft=(x, y))
 
+    def update_appearance(self):
+        if self.crack_frame is not None:
+            tile_key = f"tile_crack{min(4, self.crack_frame)}"
+        else:
+            tile_key = f"tile_{self.p_type}"
+            
+        self.tile_img = assets.images.get(tile_key, assets.images["tile_normal"])
+        self.image = pygame.Surface((16 * self.width_in_tiles, 16), pygame.SRCALPHA)
+        for i in range(self.width_in_tiles):
+            self.image.blit(self.tile_img, (i * 16, 0))
+
+    def step_on(self):
+        if self.crack_frame is not None and self.decay_start_time is None:
+            self.decay_start_time = pygame.time.get_ticks()
+
+    def update(self):
+        if self.decay_start_time is not None:
+            elapsed = (pygame.time.get_ticks() - self.decay_start_time) / 1000.0
+            if elapsed >= 3.0:
+                self.destroy()
+            else:
+                new_frame = int((elapsed / 3.0) * 5)
+                if new_frame != self.crack_frame and new_frame <= 4:
+                    self.crack_frame = new_frame
+                    self.update_appearance()
+
+    def destroy(self):
+        for entity in self.attached_entities:
+            entity.kill()
+        self.attached_entities.clear()
+        self.kill()
+
     def apply_dof(self, dof_type):
-        if dof_type == "LEFT": self.rect.x -= 24
-        elif dof_type == "RIGHT": self.rect.x += 24
-        elif dof_type == "UP": self.rect.y -= 20
-        elif dof_type == "DOWN": self.rect.y += 20
+        dx, dy = 0, 0
+        if dof_type == "LEFT": dx = -24
+        elif dof_type == "RIGHT": dx = 24
+        elif dof_type == "UP": dy = -20
+        elif dof_type == "DOWN": dy = 20
+        
+        self.rect.x += dx
+        self.rect.y += dy
+        
+        for entity in self.attached_entities:
+            entity.rect.x += dx
+            entity.rect.y += dy
 
 class Token(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, platform=None):
         super().__init__()
         self.image = assets.images["dof"]
         self.rect = self.image.get_rect(center=(x, y))
+        self.platform = platform
+        if platform:
+            platform.attached_entities.append(self)
 
-class Spike(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+class Obstacle(pygame.sprite.Sprite):
+    def __init__(self, x, y, obs_type="spike", platform=None):
         super().__init__()
-        self.image = assets.images["spike"]
+        self.obs_type = obs_type
+        self.image = assets.images[obs_type]
         self.rect = self.image.get_rect(bottomleft=(x, y))
+        self.platform = platform
+        if platform:
+            platform.attached_entities.append(self)
 
 class Player(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
         self.image = assets.images["robot"]
         self.rect = self.image.get_rect(topleft=(x, y))
-        self.vel_y = 0
-        self.speed = 2.0
+        self.x = float(x)
+        self.y = float(y)
+        self.vel_y = 0.0
+        self.base_speed = 2.0
+        self.slow_timer = 0.0
+        self.slide_vel = 0.0
         self.is_grounded = False
+        self.facing = 1
 
-    def update(self, platforms):
+    def apply_slow(self, duration=1.5):
+        self.slow_timer = duration
+
+    def update(self, platforms, dt):
         keys = pygame.key.get_pressed()
         
+        # Determine movement speed based on slow effect
+        current_speed = self.base_speed
+        if self.slow_timer > 0:
+            self.slow_timer -= dt
+            current_speed = 0.8
+        
         if keys[pygame.K_a]:
-            self.rect.x -= self.speed
+            self.x -= current_speed
+            self.facing = -1
         if keys[pygame.K_d]:
-            self.rect.x += self.speed
+            self.x += current_speed
+            self.facing = 1
 
         if keys[pygame.K_SPACE] and self.is_grounded:
             self.vel_y = -5.5
             self.is_grounded = False
 
         self.vel_y += 0.3
-        self.rect.y += int(self.vel_y)
+        
+        old_bottom = self.rect.bottom
+        self.y += self.vel_y
+        self.rect.y = int(self.y)
 
         self.is_grounded = False
-        for platform in platforms:
-            if self.rect.colliderect(platform.rect):
-                if self.vel_y > 0 and self.rect.bottom - int(self.vel_y) <= platform.rect.top + 4:
-                    self.rect.bottom = platform.rect.top
-                    self.vel_y = 0
-                    self.is_grounded = True
+        current_platform = None
 
-# Groups
+        if self.vel_y >= 0:
+            for platform in platforms:
+                if (old_bottom <= platform.rect.top + 2 and 
+                    self.rect.bottom >= platform.rect.top and 
+                    self.rect.right > platform.rect.left and 
+                    self.rect.left < platform.rect.right):
+                    
+                    self.rect.bottom = platform.rect.top
+                    self.y = float(self.rect.y)
+                    self.vel_y = 0.0
+                    self.is_grounded = True
+                    current_platform = platform
+                    platform.step_on()
+                    break
+
+        # Slower Ice Slide Dynamics
+        if self.is_grounded and current_platform and current_platform.p_type == "ice":
+            self.slide_vel += self.facing * 0.15  # Slower build-up (was 0.4)
+            self.slide_vel = max(-1.8, min(1.8, self.slide_vel))  # Reduced max speed (was 3.0)
+            self.x += self.slide_vel
+        else:
+            self.slide_vel *= 0.45  # Slightly faster momentum drop when leaving ice
+            if abs(self.slide_vel) > 0.05:
+                self.x += self.slide_vel
+
+        self.rect.x = int(self.x)
+
+# Separate Groups for logic handling
 platforms = pygame.sprite.Group()
 tokens = pygame.sprite.Group()
 spikes = pygame.sprite.Group()
+rocks = pygame.sprite.Group()
+bushes = pygame.sprite.Group()
 player = Player(40, 140)
 
-# Improved Infinite World Generation State
 last_spawn_x = 0
 last_spawn_y = 180
 min_gap, max_gap = 25, 45
@@ -103,14 +207,10 @@ game_time = 0
 def spawn_world_chunk():
     global last_spawn_x, last_spawn_y
     while last_spawn_x < player.rect.x + GAME_W + 120:
-        # Calculate dynamic gaps based on game progression
         gap = random.randint(int(min_gap), int(max_gap))
-        
-        # Keep next platform height within reachable jump distance
         y_change = random.choice([-25, -15, 0, 15, 25])
         spawn_y = max(80, min(GAME_H - 40, last_spawn_y + y_change))
         
-        # Dynamic platform width (4 to 7 tiles wide)
         tile_count = random.randint(4, 7)
         spawn_x = last_spawn_x + gap
         
@@ -118,32 +218,68 @@ def spawn_world_chunk():
         plat = Platform(spawn_x, spawn_y, tile_count, p_type)
         platforms.add(plat)
         
-        # Hazard and Token Placement
-        if random.random() < 0.3:
-            spike_offset = random.randint(1, tile_count - 1) * 16
-            spikes.add(Spike(spawn_x + spike_offset, spawn_y))
+        # Spawn decor/obstacles
+        if random.random() < 0.4:
+            obs_choice = random.choice(["spike", "rock0", "rock1", "bush"])
+            obs_offset = random.randint(1, tile_count - 1) * 16
+            
+            if obs_choice == "spike":
+                spikes.add(Obstacle(spawn_x + obs_offset, spawn_y, obs_choice, plat))
+            elif obs_choice in ["rock0", "rock1"]:
+                rocks.add(Obstacle(spawn_x + obs_offset, spawn_y, obs_choice, plat))
+            elif obs_choice == "bush":
+                bushes.add(Obstacle(spawn_x + obs_offset, spawn_y, obs_choice, plat))
+                
         elif random.random() < 0.25:
             token_offset = (tile_count * 16) // 2
-            tokens.add(Token(spawn_x + token_offset, spawn_y - 10))
+            tokens.add(Token(spawn_x + token_offset, spawn_y - 10, plat))
 
         last_spawn_x = spawn_x + (tile_count * 16)
         last_spawn_y = spawn_y
 
-# Initial safe starting platform
 start_plat = Platform(10, 180, 8, "normal")
 platforms.add(start_plat)
 last_spawn_x = 10 + (8 * 16)
 
-# Main Loop
 camera_x = 0
 running = True
 font = pygame.font.SysFont("Consolas", 10, bold=True)
 
+# Start Screen Loop
+in_start_screen = True
+while in_start_screen:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            m_x, m_y = pygame.mouse.get_pos()
+            c_x, c_y = m_x // SCALE, m_y // SCALE
+            btn_rect = pygame.Rect(GAME_W // 2 - 40, GAME_H // 2 + 5, 80, 24)
+            if btn_rect.collidepoint((c_x, c_y)):
+                in_start_screen = False
+
+    CANVAS.blit(assets.images["bgm"], (0, 0))
+    particles.update_and_draw(CANVAS, camera_x)
+    
+    score_surf = font.render(f"Best Distance: {best_distance}m", True, (240, 240, 255))
+    CANVAS.blit(score_surf, (GAME_W // 2 - score_surf.get_width() // 2, GAME_H // 2 - 20))
+    
+    btn_rect = pygame.Rect(GAME_W // 2 - 40, GAME_H // 2 + 5, 80, 24)
+    pygame.draw.rect(CANVAS, (60, 100, 180), btn_rect)
+    btn_text = font.render("START", True, (255, 255, 255))
+    CANVAS.blit(btn_text, (btn_rect.centerx - btn_text.get_width() // 2, btn_rect.centery - btn_text.get_height() // 2))
+
+    scaled_surface = pygame.transform.scale(CANVAS, (WINDOW_W, WINDOW_H))
+    SCREEN.blit(scaled_surface, (0, 0))
+    pygame.display.flip()
+    CLOCK.tick(60)
+
+# Main Game Loop
 while running:
     dt = CLOCK.tick(60) / 1000.0
     game_time += dt
     
-    # Scale gap size slightly over time
     max_gap = min(80, 45 + (game_time * 0.4))
 
     now = pygame.time.get_ticks()
@@ -170,35 +306,95 @@ while running:
                         break
 
     spawn_world_chunk()
-    player.update(platforms)
+    platforms.update()
+    player.update(platforms, dt)
     
-    # Pickups
+    current_distance = max(0, int((player.rect.x - 40) / 10))
+    if current_distance > best_distance:
+        best_distance = current_distance
+        save_high_score(best_distance)
+    
+    # Collect Tokens
     if pygame.sprite.spritecollide(player, tokens, True):
         dof_charges = min(3, dof_charges + 1)
 
-    # Spike hazard or fell down
-    if pygame.sprite.spritecollide(player, spikes, False) or player.rect.top > GAME_H:
-        player.rect.x, player.rect.y = camera_x + 20, 100
-        player.vel_y = 0
+    # Hit Rock -> Lose 1 DOF
+    hit_rocks = pygame.sprite.spritecollide(player, rocks, True)
+    if hit_rocks:
+        dof_charges = max(0, dof_charges - 1)
 
-    # Cleanup off-screen
-    for entity in list(platforms) + list(tokens) + list(spikes):
+    # Hit Bush -> Apply Slow Effect
+    if pygame.sprite.spritecollide(player, bushes, False):
+        player.apply_slow(1.5)
+
+    # Death Check (Only Spikes or Falling)
+    if pygame.sprite.spritecollide(player, spikes, False) or player.rect.top > GAME_H:
+        in_death_screen = True
+        while in_death_screen:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    m_x, m_y = pygame.mouse.get_pos()
+                    c_x, c_y = m_x // SCALE, m_y // SCALE
+                    retry_btn_rect = pygame.Rect(GAME_W // 2 - 50, GAME_H // 2 + 5, 100, 24)
+                    if retry_btn_rect.collidepoint((c_x, c_y)):
+                        player.x = 40.0
+                        player.y = 140.0
+                        player.rect.x = 40
+                        player.rect.y = 140
+                        player.vel_y = 0.0
+                        player.slide_vel = 0.0
+                        player.slow_timer = 0.0
+                        platforms.empty()
+                        tokens.empty()
+                        spikes.empty()
+                        rocks.empty()
+                        bushes.empty()
+                        
+                        start_plat = Platform(10, 180, 8, "normal")
+                        platforms.add(start_plat)
+                        last_spawn_x = 10 + (8 * 16)
+                        last_spawn_y = 180
+                        game_time = 0
+                        dof_charges = 3
+                        camera_x = 0
+                        in_death_screen = False
+
+            CANVAS.blit(assets.images["bgm"], (0, 0))
+            
+            final_score_surf = font.render(f"Distance: {current_distance}m", True, (240, 240, 255))
+            CANVAS.blit(final_score_surf, (GAME_W // 2 - final_score_surf.get_width() // 2, GAME_H // 2 - 20))
+            
+            retry_btn_rect = pygame.Rect(GAME_W // 2 - 50, GAME_H // 2 + 5, 100, 24)
+            pygame.draw.rect(CANVAS, (180, 60, 60), retry_btn_rect)
+            retry_text = font.render("PLAY AGAIN", True, (255, 255, 255))
+            CANVAS.blit(retry_text, (retry_btn_rect.centerx - retry_text.get_width() // 2, retry_btn_rect.centery - retry_text.get_height() // 2))
+
+            scaled_surface = pygame.transform.scale(CANVAS, (WINDOW_W, WINDOW_H))
+            SCREEN.blit(scaled_surface, (0, 0))
+            pygame.display.flip()
+            CLOCK.tick(60)
+
+    # Garbage collection for off-screen sprites
+    all_entities = list(platforms) + list(tokens) + list(spikes) + list(rocks) + list(bushes)
+    for entity in all_entities:
         if entity.rect.right < camera_x - 60:
             entity.kill()
 
-    # Smooth Camera
     camera_x += (player.rect.x - camera_x - 60) * 0.1
 
-    # RENDER
-    CANVAS.fill((15, 18, 28))
-    particles.update_and_draw(CANVAS)
+    CANVAS.blit(assets.images["bgm"], (0, 0))
+    particles.update_and_draw(CANVAS, camera_x)
 
     for p in platforms: CANVAS.blit(p.image, (p.rect.x - camera_x, p.rect.y))
     for s in spikes: CANVAS.blit(s.image, (s.rect.x - camera_x, s.rect.y))
+    for r in rocks: CANVAS.blit(r.image, (r.rect.x - camera_x, r.rect.y))
+    for b in bushes: CANVAS.blit(b.image, (b.rect.x - camera_x, b.rect.y))
     for t in tokens: CANVAS.blit(t.image, (t.rect.x - camera_x, t.rect.y))
     CANVAS.blit(player.image, (player.rect.x - camera_x, player.rect.y))
 
-    # HUD
     hud_surf = font.render(f"DOF: {DOF_TYPES[current_dof_idx]} | {dof_charges}/3", True, (240, 240, 255))
     CANVAS.blit(hud_surf, (5, 5))
     CANVAS.blit(assets.images["dof"], (5, 18))
