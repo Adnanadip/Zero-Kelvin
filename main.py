@@ -138,25 +138,31 @@ class Player(pygame.sprite.Sprite):
     def update(self, platforms, dt):
         keys = pygame.key.get_pressed()
         
-        # Determine movement speed based on slow effect
+        # Determine base movement speed
         current_speed = self.base_speed
         if self.slow_timer > 0:
             self.slow_timer -= dt
             current_speed = 0.8
-        
+            
+        # Horizontal Input Handling
+        input_dir = 0
         if keys[pygame.K_a]:
-            self.x -= current_speed
+            input_dir -= 1
             self.facing = -1
         if keys[pygame.K_d]:
-            self.x += current_speed
+            input_dir += 1
             self.facing = 1
 
+        self.x += input_dir * current_speed
+
+        # Jump handling (carries slide momentum)
         if keys[pygame.K_SPACE] and self.is_grounded:
             self.vel_y = -5.5
             self.is_grounded = False
 
         self.vel_y += 0.3
         
+        # Vertical movement and collision
         old_bottom = self.rect.bottom
         self.y += self.vel_y
         self.rect.y = int(self.y)
@@ -165,11 +171,12 @@ class Player(pygame.sprite.Sprite):
         current_platform = None
 
         if self.vel_y >= 0:
+            # Requires horizontal overlap of at least 2 pixels to prevent edge-phasing
             for platform in platforms:
-                if (old_bottom <= platform.rect.top + 2 and 
+                if (old_bottom <= platform.rect.top + 4 and 
                     self.rect.bottom >= platform.rect.top and 
-                    self.rect.right > platform.rect.left and 
-                    self.rect.left < platform.rect.right):
+                    self.rect.right > platform.rect.left + 2 and 
+                    self.rect.left < platform.rect.right - 2):
                     
                     self.rect.bottom = platform.rect.top
                     self.y = float(self.rect.y)
@@ -179,17 +186,23 @@ class Player(pygame.sprite.Sprite):
                     platform.step_on()
                     break
 
-        # Slower Ice Slide Dynamics
+        # Ice slide momentum physics
         if self.is_grounded and current_platform and current_platform.p_type == "ice":
-            self.slide_vel += self.facing * 0.15  # Slower build-up (was 0.4)
-            self.slide_vel = max(-1.8, min(1.8, self.slide_vel))  # Reduced max speed (was 3.0)
-            self.x += self.slide_vel
+            if input_dir != 0:
+                self.slide_vel += input_dir * 0.15
+            else:
+                self.slide_vel *= 0.92  # Smooth glide friction when no key pressed
+            self.slide_vel = max(-1.8, min(1.8, self.slide_vel))
         else:
-            self.slide_vel *= 0.45  # Slightly faster momentum drop when leaving ice
-            if abs(self.slide_vel) > 0.05:
-                self.x += self.slide_vel
+            # Preserve momentum during airborne jumps, gently fade out over time
+            air_drag = 0.98 if not self.is_grounded else 0.60
+            self.slide_vel *= air_drag
+            if abs(self.slide_vel) < 0.02:
+                self.slide_vel = 0.0
 
+        self.x += self.slide_vel
         self.rect.x = int(self.x)
+
 
 # Separate Groups for logic handling
 platforms = pygame.sprite.Group()
