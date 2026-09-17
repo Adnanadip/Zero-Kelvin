@@ -7,8 +7,8 @@ from effects import ParticleSystem
 
 pygame.init()
 
-GAME_W, GAME_H = 500, 400
-SCALE = 3
+GAME_W, GAME_H = 500, 375
+SCALE = 2
 WINDOW_W, WINDOW_H = GAME_W * SCALE, GAME_H * SCALE
 
 SCREEN = pygame.display.set_mode((WINDOW_W, WINDOW_H))
